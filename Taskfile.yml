@@ -1,0 +1,134 @@
+version: '3'
+
+vars:
+  TEST_FOLDER: "tests"
+  SOURCE_FOLDER: "src"
+  TERRAFORM_FOLDER: "terraform"
+  TERRAFORM_VERSION: "1.16.0"
+
+tasks:
+
+  install-all-packages:
+    desc: "Internal function to install all packages"
+    silent: true
+    internal: true
+    cmds:
+      - printf "Installing all dependencies.\n"
+      - uv sync --all-groups -q
+      - printf "All dependencies installed.\n"
+
+  create-venv:
+    desc: Create the Python virtual environment
+    cmds:
+      - printf "Installing all dependencies.\n"
+      - uv sync --all-groups
+      - printf "All dependencies installed.\n"
+
+  test:
+    desc: Run pytest with coverage
+    cmds:
+      - uv run pytest --cov=src --cov-report=term-missing
+    deps:
+      - install-all-packages
+
+  check-format:
+    desc: Check code formatting, linting, and types
+    cmds:
+      - printf "Running static code analysis and check typing for src folder\n"
+      - uv run ruff check {{.SOURCE_FOLDER}}
+      - printf "Run code analysis on tests without pydocstyle\n"
+      - uv run ruff check --ignore D {{.TEST_FOLDER}}
+      - printf "Run mypy check on src folder\n"
+      - uv run mypy {{.SOURCE_FOLDER}}
+    deps:
+      - install-all-packages
+
+  format:
+    desc: Format and lint the code
+    cmds:
+      - printf "Running code formatting via ruff\n"
+      - uv run ruff check --fix {{.SOURCE_FOLDER}} {{.TEST_FOLDER}}
+      - uv run ruff format {{.SOURCE_FOLDER}} {{.TEST_FOLDER}}
+
+    deps:
+      - install-all-packages
+
+  clean:
+    desc: Remove the virtual environment and generated files
+    cmds:
+      - rm -rf .venv
+      - rm -rf .pytest_cache
+      - rm -rf .mypy_cache
+      - rm -rf .ruff_cache
+      - rm -rf htmlcov
+      - rm -rf .coverage
+      - printf "Cleaned up"
+
+  tf:setup:
+    desc: "Select the Terraform version using tfswitch"
+    internal: true
+    cmds:
+      - printf "Selecting Terraform version {{.TERRAFORM_VERSION}} via tfswitch.\n"
+      - tfswitch {{.TERRAFORM_VERSION}}
+      - terraform version
+
+  tf:init:
+    desc: "Initialize Terraform for an environment (ENV=...)"
+    deps:
+      - tf:setup
+    preconditions:
+      - sh: test -n "{{.ENV}}"
+        msg: "ENV must be specified, e.g. ENV=dev task tf:init"
+      - sh: test -d "{{.TERRAFORM_FOLDER}}"
+        msg: "Terraform folder '{{.TERRAFORM_FOLDER}}' does not exist."
+      - sh: test -f "{{.TERRAFORM_FOLDER}}/environments/backend-{{.ENV}}.hcl"
+        msg: "Terraform backend configuration for '{{.ENV}}' does not exist."
+    cmds:
+      - printf "Initializing Terraform for {{.ENV}}.\n"
+      - terraform -chdir={{.TERRAFORM_FOLDER}} init -backend-config="environments/backend-{{.ENV}}.hcl"
+      - printf "✓ Terraform initialized for {{.ENV}}.\n"
+
+  tf:plan:
+    desc: "Create a Terraform plan for an environment (ENV=...)"
+    deps:
+      - tf:setup
+    preconditions:
+      - sh: test -n "{{.ENV}}"
+        msg: "ENV must be specified, e.g. ENV=dev task tf:plan"
+      - sh: test -d "{{.TERRAFORM_FOLDER}}"
+        msg: "Terraform folder '{{.TERRAFORM_FOLDER}}' does not exist."
+      - sh: test -f "{{.TERRAFORM_FOLDER}}/environments/backend-{{.ENV}}.hcl"
+        msg: "Terraform backend configuration for '{{.ENV}}' does not exist."
+      - sh: test -f "{{.TERRAFORM_FOLDER}}/environments/{{.ENV}}.tfvars"
+        msg: "Terraform variables file for '{{.ENV}}' does not exist."
+    cmds:
+      - printf "Initializing Terraform for {{.ENV}}.\n"
+      - terraform -chdir={{.TERRAFORM_FOLDER}} init -backend-config="environments/backend-{{.ENV}}.hcl"
+      - printf "Creating Terraform plan for {{.ENV}}.\n"
+      - terraform -chdir={{.TERRAFORM_FOLDER}} plan -var-file="environments/{{.ENV}}.tfvars" -out=tfplan
+      - printf "✓ Terraform plan created for {{.ENV}}.\n"
+
+  tf:apply:
+    desc: "Apply the Terraform plan for an environment (ENV=...)"
+    deps:
+      - tf:setup
+    preconditions:
+      - sh: test -n "{{.ENV}}"
+        msg: "ENV must be specified, e.g. ENV=dev task tf:apply"
+      - sh: test -d "{{.TERRAFORM_FOLDER}}"
+        msg: "Terraform folder '{{.TERRAFORM_FOLDER}}' does not exist."
+      - sh: test -f "{{.TERRAFORM_FOLDER}}/environments/backend-{{.ENV}}.hcl"
+        msg: "Terraform backend configuration for '{{.ENV}}' does not exist."
+      - sh: test -f "{{.TERRAFORM_FOLDER}}/tfplan"
+        msg: "Terraform plan does not exist. Run 'task tf:plan ENV={{.ENV}}' first."
+    cmds:
+      - printf "Initializing Terraform for {{.ENV}}.\n"
+      - terraform -chdir={{.TERRAFORM_FOLDER}} init -backend-config="environments/backend-{{.ENV}}.hcl"
+      - printf "Applying Terraform plan for {{.ENV}}.\n"
+      - terraform -chdir={{.TERRAFORM_FOLDER}} apply tfplan
+      - printf "✓ Terraform plan applied for {{.ENV}}.\n"
+
+  default:
+    silent: true
+    cmds:
+      - task --list

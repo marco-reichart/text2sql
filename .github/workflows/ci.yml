@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test & Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install Task
+        uses: go-task/setup-task@v1
+
+      - name: Create environment and install dependencies
+        run: uv sync --all-groups --locked
+
+      - name: Run tests
+        run: task test
+
+      - name: Check formatting and types
+        run: task check-format
+
+  build-lambda:
+    name: Build Lambda
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: latest
+
+      - name: Build Lambda package
+        run: |
+          rm -rf build lambda.zip
+          mkdir build
+
+          uv export \
+            --format requirements-txt \
+            --no-dev \
+            --output-file build/requirements.txt
+
+          uv pip install \
+            --python 3.12 \
+            --target build \
+            -r build/requirements.txt
+
+          cp -r src/. build/
+
+          cd build
+          zip -r ../lambda.zip . -x "*/__pycache__/*"
+
+      - name: Upload Lambda artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-package
+          path: lambda.zip
+
+  deploy-lambda:
+    name: Deploy Lambda
+    needs: build-lambda
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    environment: dev
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Lambda artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-package
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload Lambda package to S3
+        run: |
+          aws s3 cp \
+            lambda.zip \
+            s3://${{ vars.DEPLOYMENT_BUCKET }}/lambda/text2sql/text2sql.zip
+
+      - name: Update Lambda function
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ vars.LAMBDA_FUNCTION_NAME }}" \
+            --s3-bucket "${{ vars.DEPLOYMENT_BUCKET }}" \
+            --s3-key "lambda/text2sql/text2sql.zip"

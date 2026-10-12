@@ -1,0 +1,44 @@
+__pycache__/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Environments
+.env
+src/.env
+.venv
+.venv_poetry
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE stuff
+.idea/
+.DS_Store
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# build files
+version.md
+
+data/
+# Local .terraform directories
+**/.terraform/*
+**/.terraform.lock.hcl
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan.out
+terraform/tfplan
+terraform/builds/*

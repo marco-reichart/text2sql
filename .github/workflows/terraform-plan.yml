@@ -1,0 +1,64 @@
+name: Terraform Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Terraform environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - preprod
+          - prod
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Terraform Plan - ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Task
+        uses: go-task/setup-task@v1
+
+      - name: Install tfswitch
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          curl -L https://raw.githubusercontent.com/warrensbox/terraform-switcher/release/install.sh \
+            | bash -s -- -b "$HOME/.local/bin"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          "$HOME/.local/bin/tfswitch" --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Terraform Init
+        run: task tf:init ENV=${{ inputs.environment }}
+
+      - name: Terraform Plan
+        run: task tf:plan ENV=${{ inputs.environment }}
+
+      - name: Upload Terraform plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ inputs.environment }}
+          path: terraform/tfplan
+          retention-days: 30
